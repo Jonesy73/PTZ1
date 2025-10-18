@@ -30,6 +30,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 		private double lastCheckPrice;
 		private DateTime lastCheckTime;
+		private Dictionary<double, string> priceLevels;
+		private DateTime lastLevelUpdate;
 
 		protected override void OnStateChange()
 		{
@@ -93,6 +95,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 				lastCheckPrice = 0;
 				lastCheckTime = DateTime.MinValue;
+				priceLevels = new Dictionary<double, string>();
+				lastLevelUpdate = DateTime.MinValue;
 			}
 		}
 
@@ -103,6 +107,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 			if (ptzIndicator == null)
 				return;
+
+			// Update price levels from chart drawing objects
+			if (Time[0].Date != lastLevelUpdate.Date)
+			{
+				UpdatePriceLevelsFromChart();
+				lastLevelUpdate = Time[0];
+			}
 
 			// Get current price
 			double currentPrice = Close[0];
@@ -161,90 +172,155 @@ namespace NinjaTrader.NinjaScript.Strategies
 			}
 		}
 
+		private void UpdatePriceLevelsFromChart()
+		{
+			priceLevels.Clear();
+
+			if (ChartControl == null || ChartControl.ChartObjects == null)
+				return;
+
+			try
+			{
+				foreach (var drawObject in ChartControl.ChartObjects)
+				{
+					if (drawObject == null)
+						continue;
+
+					string tag = drawObject.Tag ?? string.Empty;
+					double priceLevel = 0;
+
+					if (drawObject is NinjaTrader.NinjaScript.DrawingTools.Line)
+					{
+						var line = drawObject as NinjaTrader.NinjaScript.DrawingTools.Line;
+						priceLevel = line.StartAnchor.Price;
+					}
+					else if (drawObject is NinjaTrader.NinjaScript.DrawingTools.HorizontalLine)
+					{
+						var hLine = drawObject as NinjaTrader.NinjaScript.DrawingTools.HorizontalLine;
+						priceLevel = hLine.StartAnchor.Price;
+					}
+					else if (drawObject is NinjaTrader.NinjaScript.DrawingTools.Ray)
+					{
+						var ray = drawObject as NinjaTrader.NinjaScript.DrawingTools.Ray;
+						priceLevel = ray.StartAnchor.Price;
+					}
+					else if (drawObject is NinjaTrader.NinjaScript.DrawingTools.Text)
+					{
+						var text = drawObject as NinjaTrader.NinjaScript.DrawingTools.Text;
+						priceLevel = text.Anchor.Price;
+						string textContent = text.DisplayText ?? string.Empty;
+
+						if (!string.IsNullOrEmpty(textContent) && priceLevel > 0)
+						{
+							if (!priceLevels.ContainsKey(priceLevel))
+								priceLevels[priceLevel] = textContent;
+						}
+					}
+
+					if (priceLevel > 0 && !string.IsNullOrEmpty(tag))
+					{
+						if (!priceLevels.ContainsKey(priceLevel))
+							priceLevels[priceLevel] = tag;
+					}
+				}
+
+				if (priceLevels.Count > 0)
+					Print(string.Format("{0}: Found {1} price levels from chart", Time[0], priceLevels.Count));
+			}
+			catch (Exception ex)
+			{
+				Print(string.Format("Error updating price levels: {0}", ex.Message));
+			}
+		}
+
 		private bool ShouldBuyAtLevel(double currentPrice, double previousPrice)
 		{
-			// Note: Since we cannot directly access the indicator's internal level data structure,
-			// this is a template implementation. You will need to modify the PTZDailyPlanURLv2 indicator
-			// to expose its price levels and descriptions through public properties or methods.
+			if (priceLevels.Count == 0)
+				return false;
 
-			// Template logic (requires indicator modification to expose level data):
-			// foreach (var level in ptzIndicator.GetPriceLevels())
-			// {
-			//     string description = level.Description.ToLower();
-			//     double levelPrice = level.Price;
-			//
-			//     bool isBuyLevel = false;
-			//
-			//     if (UseSupport && description.Contains(KeywordSupport.ToLower()))
-			//         isBuyLevel = true;
-			//     if (UsePivotBull && description.Contains(KeywordPivotBull.ToLower()))
-			//         isBuyLevel = true;
-			//     if (UseStrengthConfirmed && description.Contains(KeywordStrengthConfirmed.ToLower()))
-			//         isBuyLevel = true;
-			//
-			//     if (isBuyLevel)
-			//     {
-			//         double proximity = PriceProximityTicks * TickSize;
-			//
-			//         if (TradeOnCrossover)
-			//         {
-			//             // Check if price crossed above the level
-			//             if (previousPrice <= levelPrice && currentPrice > levelPrice)
-			//                 return true;
-			//         }
-			//
-			//         if (TradeOnTouch)
-			//         {
-			//             // Check if price is within proximity of the level
-			//             if (Math.Abs(currentPrice - levelPrice) <= proximity)
-			//                 return true;
-			//         }
-			//     }
-			// }
+			double proximity = PriceProximityTicks * TickSize;
+
+			foreach (var level in priceLevels)
+			{
+				double levelPrice = level.Key;
+				string description = level.Value.ToLower();
+
+				bool isBuyLevel = false;
+
+				if (UseSupport && description.Contains(KeywordSupport.ToLower()))
+					isBuyLevel = true;
+				if (UsePivotBull && description.Contains(KeywordPivotBull.ToLower()))
+					isBuyLevel = true;
+				if (UseStrengthConfirmed && description.Contains(KeywordStrengthConfirmed.ToLower()))
+					isBuyLevel = true;
+
+				if (isBuyLevel)
+				{
+					if (TradeOnCrossover)
+					{
+						if (previousPrice <= levelPrice && currentPrice > levelPrice)
+						{
+							Print(string.Format("{0}: BUY Signal - Price crossed above {1} at {2}", Time[0], description, levelPrice));
+							return true;
+						}
+					}
+
+					if (TradeOnTouch)
+					{
+						if (currentPrice >= levelPrice && Math.Abs(currentPrice - levelPrice) <= proximity)
+						{
+							Print(string.Format("{0}: BUY Signal - Price touching {1} at {2}", Time[0], description, levelPrice));
+							return true;
+						}
+					}
+				}
+			}
 
 			return false;
 		}
 
 		private bool ShouldSellAtLevel(double currentPrice, double previousPrice)
 		{
-			// Note: Since we cannot directly access the indicator's internal level data structure,
-			// this is a template implementation. You will need to modify the PTZDailyPlanURLv2 indicator
-			// to expose its price levels and descriptions through public properties or methods.
+			if (priceLevels.Count == 0)
+				return false;
 
-			// Template logic (requires indicator modification to expose level data):
-			// foreach (var level in ptzIndicator.GetPriceLevels())
-			// {
-			//     string description = level.Description.ToLower();
-			//     double levelPrice = level.Price;
-			//
-			//     bool isSellLevel = false;
-			//
-			//     if (UseResistance && description.Contains(KeywordResistance.ToLower()))
-			//         isSellLevel = true;
-			//     if (UsePivotBear && description.Contains(KeywordPivotBear.ToLower()))
-			//         isSellLevel = true;
-			//     if (UseWeaknessConfirmed && description.Contains(KeywordWeaknessConfirmed.ToLower()))
-			//         isSellLevel = true;
-			//
-			//     if (isSellLevel)
-			//     {
-			//         double proximity = PriceProximityTicks * TickSize;
-			//
-			//         if (TradeOnCrossover)
-			//         {
-			//             // Check if price crossed below the level
-			//             if (previousPrice >= levelPrice && currentPrice < levelPrice)
-			//                 return true;
-			//         }
-			//
-			//         if (TradeOnTouch)
-			//         {
-			//             // Check if price is within proximity of the level
-			//             if (Math.Abs(currentPrice - levelPrice) <= proximity)
-			//                 return true;
-			//         }
-			//     }
-			// }
+			double proximity = PriceProximityTicks * TickSize;
+
+			foreach (var level in priceLevels)
+			{
+				double levelPrice = level.Key;
+				string description = level.Value.ToLower();
+
+				bool isSellLevel = false;
+
+				if (UseResistance && description.Contains(KeywordResistance.ToLower()))
+					isSellLevel = true;
+				if (UsePivotBear && description.Contains(KeywordPivotBear.ToLower()))
+					isSellLevel = true;
+				if (UseWeaknessConfirmed && description.Contains(KeywordWeaknessConfirmed.ToLower()))
+					isSellLevel = true;
+
+				if (isSellLevel)
+				{
+					if (TradeOnCrossover)
+					{
+						if (previousPrice >= levelPrice && currentPrice < levelPrice)
+						{
+							Print(string.Format("{0}: SELL Signal - Price crossed below {1} at {2}", Time[0], description, levelPrice));
+							return true;
+						}
+					}
+
+					if (TradeOnTouch)
+					{
+						if (currentPrice <= levelPrice && Math.Abs(currentPrice - levelPrice) <= proximity)
+						{
+							Print(string.Format("{0}: SELL Signal - Price touching {1} at {2}", Time[0], description, levelPrice));
+							return true;
+						}
+					}
+				}
+			}
 
 			return false;
 		}
