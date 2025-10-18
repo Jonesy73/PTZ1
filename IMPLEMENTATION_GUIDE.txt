@@ -1,0 +1,171 @@
+PTZ DAILY PLAN STRATEGY - IMPLEMENTATION GUIDE
+==============================================
+
+OVERVIEW
+--------
+This strategy converts the PTZDailyPlanURLv2 indicator into an automated trading strategy
+that buys at support/pivot bull levels and sells at resistance/pivot bear levels.
+
+
+CURRENT STATUS
+--------------
+✓ Strategy framework created (PTZDailyPlanStrategy.cs)
+✓ Entry/exit logic structure implemented
+✓ Risk management parameters included (stop loss, profit target, trail stop)
+✓ Configurable level types and keywords
+✓ Price proximity and crossover detection logic
+
+⚠ REQUIRES: Indicator modification to expose price level data
+
+
+REQUIRED MODIFICATION TO PTZDailyPlanURLv2 INDICATOR
+----------------------------------------------------
+The PTZDailyPlanURLv2.dll indicator needs to be modified to expose its price levels
+and descriptions to the strategy. You need to add a public method or property that
+returns the price levels with their descriptions.
+
+Recommended approach:
+
+1. Add a public class to hold level data:
+
+   public class PriceLevel
+   {
+       public double Price { get; set; }
+       public string Description { get; set; }
+   }
+
+2. Add a public method to the indicator:
+
+   public List<PriceLevel> GetPriceLevels()
+   {
+       // Return the list of current price levels with descriptions
+   }
+
+3. Alternatively, expose individual level properties:
+
+   public double[] SupportLevels { get; }
+   public double[] ResistanceLevels { get; }
+   public double[] PivotBullLevels { get; }
+   public double[] PivotBearLevels { get; }
+
+
+HOW TO COMPLETE THE STRATEGY
+-----------------------------
+
+1. Open the PTZDailyPlanURLv2 indicator source code
+
+2. Add the PriceLevel class and GetPriceLevels() method as described above
+
+3. In PTZDailyPlanStrategy.cs, uncomment the template logic in:
+   - ShouldBuyAtLevel() method
+   - ShouldSellAtLevel() method
+
+4. Replace the commented template code with calls to the indicator's exposed data:
+
+   foreach (var level in ptzIndicator.GetPriceLevels())
+   {
+       string description = level.Description.ToLower();
+       double levelPrice = level.Price;
+
+       // Check if this is a buy level
+       bool isBuyLevel = false;
+       if (UseSupport && description.Contains(KeywordSupport.ToLower()))
+           isBuyLevel = true;
+       if (UsePivotBull && description.Contains(KeywordPivotBull.ToLower()))
+           isBuyLevel = true;
+
+       // Check for price interaction with the level
+       if (isBuyLevel)
+       {
+           double proximity = PriceProximityTicks * TickSize;
+
+           if (TradeOnCrossover && previousPrice <= levelPrice && currentPrice > levelPrice)
+               return true;
+
+           if (TradeOnTouch && Math.Abs(currentPrice - levelPrice) <= proximity)
+               return true;
+       }
+   }
+
+
+STRATEGY PARAMETERS
+-------------------
+
+Level Types (Enable/Disable):
+- Use Support Levels
+- Use Resistance Levels
+- Use Pivot Bull Levels
+- Use Pivot Bear Levels
+- Use Strength Confirmed
+- Use Weakness Confirmed
+
+Entry Rules:
+- Price Proximity (Ticks): How close price must be to trigger a touch entry
+- Trade on Crossover: Enter when price crosses through the level
+- Trade on Touch: Enter when price gets within proximity of the level
+
+Risk Management:
+- Enable Stop Loss / Stop Loss (Ticks)
+- Enable Profit Target / Profit Target (Ticks)
+- Enable Trail Stop / Trail Stop (Ticks)
+
+Keywords:
+- Must match the keywords configured in the PTZ Daily Plan indicator
+- Default values: "Support", "Resistance", "Pivot Bull", "Pivot Bear", etc.
+
+
+TRADING LOGIC
+-------------
+
+BUY CONDITIONS:
+- Price crosses above OR touches a level with description containing:
+  * "Support"
+  * "Pivot Bull"
+  * "Strength Confirmed" (if enabled)
+
+SELL CONDITIONS:
+- Price crosses below OR touches a level with description containing:
+  * "Resistance"
+  * "Pivot Bear"
+  * "Weakness Confirmed" (if enabled)
+
+
+INSTALLATION
+------------
+
+1. Compile the modified PTZDailyPlanURLv2 indicator
+2. Compile PTZDailyPlanStrategy.cs in NinjaTrader
+3. Add the strategy to a chart
+4. Configure parameters to match your indicator settings
+5. Enable the strategy
+
+
+TESTING RECOMMENDATIONS
+-----------------------
+
+1. Test in Playback/Sim first
+2. Verify level detection is working correctly
+3. Check that buy signals occur at support/pivot bull levels
+4. Check that sell signals occur at resistance/pivot bear levels
+5. Adjust Price Proximity Ticks based on instrument tick size
+6. Test risk management parameters (stop loss, profit target)
+7. Monitor for false signals in choppy/ranging markets
+
+
+NOTES
+-----
+
+- The strategy uses Calculate.OnBarClose by default for reliability
+- Change to Calculate.OnEachTick or Calculate.OnPriceChange for real-time entries
+- Keywords are case-insensitive
+- One entry per direction (configurable via EntriesPerDirection)
+- Exits on session close by default
+- Compatible with NinjaTrader 8
+
+
+SUPPORT
+-------
+
+If you have the source code for PTZDailyPlanURLv2, the modification should be
+straightforward. If you only have the DLL, you'll need to contact the indicator
+developer to request they expose the price level data.
